@@ -14,9 +14,13 @@ description: 把一台新买的 Linux VPS 变成自用科学上网节点(梯子)
 
 1. **服务器 IP**、**SSH 端口**(默认 22)、**root 密码**(或已有私钥路径)。
 2. **要做哪几段**:只初始化 / 初始化+体检 / 全套搭梯子。用户说"做成梯子"= 全套。
-3. **用户在什么设备上用**:Mac/Windows 的 Clash Verge(Mihomo)、v2rayN、iPhone 的 Shadowrocket / Stash、安卓的 NekoBox / Hiddify……这决定第三段最后交付什么格式。
+3. **用户在什么设备上用**:Mac/Windows 的 Clash Verge(Mihomo)、v2rayN、**Surge**、iPhone 的 Shadowrocket / Stash、路由器 **OpenClash**、安卓的 NekoBox / Hiddify……这决定第三段最后交付什么格式(可以多选,`scripts/gen-clients.sh` 一次出 Surge / 小火箭 / OpenClash 三份)。
+   - **用 Surge 的要额外加 AnyTLS**:Surge 不支持 VLESS-Reality,只剩 Hy2(UDP)容易被运营商 QoS,得给它一个 TCP 主力。
 4. **本机有没有 SSH 公钥**(`~/.ssh/id_ed25519.pub` 或 `~/.ssh/id_rsa.pub`)。没有就先 `ssh-keygen -t ed25519` 生成一把。
 5. **服务商控制台能不能登**——连不上时需要用户去面板放行端口,提前说一声。
+6. **系统装了没有**:有的服务商开通后**硬盘是空的**,要用户自己在面板「重建操作系统」里选模板。首推 **Debian 12**(省资源、无 cloud-init 改 SSH 的坑),其次 Ubuntu 22.04/24.04;CentOS 7/8、Debian 10、Ubuntu 18/20 都别选。
+7. **要不要保留密码登录**:默认关掉,但用户明确要留就留(fail2ban 兜底),别反复劝。
+8. **这台机器以后还跑别的吗**:要跑大流量服务的,先提醒看套餐**月流量额度**(CN2 GIA mini 往往只有几百 GB),以及对外服务越多攻击面越大。
 
 > 密码只在本次会话里用于首次登录,配好密钥后就关掉密码登录;不要把密码写进任何文件或日志。
 
@@ -35,7 +39,18 @@ description: 把一台新买的 Linux VPS 变成自用科学上网节点(梯子)
 
 ### 首次密码登录
 
-用 `sshpass`(macOS:`brew install sshpass`;Linux:`apt install sshpass`):
+**推荐:让用户自己装公钥**,agent 全程只用密钥,不经手密码。在用户终端里跑(用户粘贴一次密码):
+```bash
+ssh-copy-id -i ~/.ssh/id_ed25519.pub -o StrictHostKeyChecking=accept-new root@IP
+```
+然后 agent 后台等待密钥可登:
+```bash
+until ssh -o BatchMode=yes -o ConnectTimeout=6 -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 root@IP true 2>/dev/null; do sleep 5; done; echo KEY_OK
+```
+顺手在 `~/.ssh/config` 加别名(见下文),后面所有命令都用 `ssh 别名`,也避开 zsh 不分词的坑。
+
+如果 agent 必须自己用密码登录,才用 `sshpass`
+(macOS:`brew install sshpass`;Linux:`apt install sshpass`):
 ```bash
 export SSHPASS='密码'
 sshpass -e ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o PreferredAuthentications=password root@IP '命令'
@@ -55,6 +70,14 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o Preferr
   - 修复:让用户去**服务商控制面板**(不是系统内!)找 **安全组 / 访问控制 / 网络与安全 / DDoS 防护 / 防火墙**,放行用户的**出口 IP** 或放行需要的端口(22/tcp、443/tcp、Hy2 用的 udp 端口)。系统内 ufw/iptables 加白名单没用——流量根本到不了系统。
 - 本机出口 IP:`curl -s https://api.ipify.org`(注意它可能会变;开着代理时查到的是代理 IP)。
 - 面板一般有 **VNC / 救援模式**(带外控制台,不经 SSH 和高防),实在搞不定时让用户走 VNC。
+
+- **先排除本机代理!** 用户电脑开着 Surge 增强模式 / Clash TUN 时,连 VPS 的流量会**先被本机代理接住再从机场节点转出**——表现为任何端口都「握手成功、不回数据、秒断」,和高防一模一样,而且很多机场**封 22 端口**。排查:
+  ```bash
+  route -n get IP | grep interface   # 是 utunX 就说明走了 TUN
+  scutil --proxy | grep -E 'Enable|Port'   # 6152/6153 = Surge,7890 = Clash
+  ```
+  对照实验:连 `github.com:22` 能拿到 `SSH-2.0-` banner 而 VPS 不行 → 代理放行 22,问题在 VPS 侧;两个都不行 → 先给 VPS IP 加直连规则(Surge:`IP-CIDR,IP/32,DIRECT,no-resolve`)或临时关 TUN。
+- **SSH 握手前就断(`kex_exchange_identification: Connection closed`)且代理已排除** → 让用户开面板 **VNC 看一眼**:很可能是 `No bootable device`(**没装系统**),或者还在装。
 
 判断口诀:**没服务的端口也秒断 = 边缘设备/安全组;只有 22 被拒 = sshd 或防火墙规则;超时 = 被 DROP(防火墙丢包)。**
 
@@ -138,6 +161,9 @@ SSH_PUBKEY="ssh-ed25519 AAAA..." DISABLE_PASSWORD_AUTH=yes bash setup.sh
    nohup bash -c 'printf "\n" | bash <(curl -L -s check.unlock.media); echo "### MEDIA_DONE"' > /root/media_result.log 2>&1 &
    ```
 3. **两者都要跑 5–8 分钟**(三网测速 + iperf3 是耗时大头),沿用"后台任务 + 轮询日志"模式,别在前台傻等导致连接超时。
+   - **⚠️ 很费流量**:一次完整 NodeQuality 实测约 **4 GB**。小流量套餐(CN2 GIA mini 等)**开跑前先告诉用户**;想省流量就把第 3 个答案(网络质量/测速)改成 `n`:`printf "f\ny\nn\ny\n"`,回程路由和 IP 质量照样有。
+   - 读结果:日志里满是进度动画和广告,用 `sed -r "s/\x1b\[[0-9;?]*[a-zA-Z]//g" 日志 | tr "\r" "\n" | grep -vE "⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏"` 清洗后再 grep 关键行;报告链接 grep `nodequality.com/r/`。
+   - 国内三网测速点偶尔全部 `ERROR`(测速服务器侧问题),此时以回程路由(CN2 GIA / CMIN2 / 9929 等)和延迟为准,别重跑浪费流量。
 4. **收尾清理**:NodeQuality 会在 `/root/.nodequality*/` 下建含 `/dev` bind mount 的沙盒目录,**直接 `rm -rf` 会报 `Device or resource busy`**,要先卸载:
    ```bash
    for m in $(mount | grep -oE "/root/.nodequality[^ ]*"); do umount -l "$m" 2>/dev/null; done
@@ -155,14 +181,15 @@ SSH_PUBKEY="ssh-ed25519 AAAA..." DISABLE_PASSWORD_AUTH=yes bash setup.sh
 
 ---
 
-## 三、部署代理节点(sing-box:VLESS-Reality + Hysteria2)
+## 三、部署代理节点(sing-box:VLESS-Reality + Hysteria2 [+ AnyTLS])
 
-个人自建的共识是**双协议并行**,不是二选一——某条线路被干扰时,换协议比换机器有效:
+个人自建的共识是**多协议并行**,不是二选一——某条线路被干扰时,换协议比换机器有效:
 
 | 协议 | 角色 | 端口 | 理由 |
 |---|---|---|---|
 | VLESS + Reality | 主力 | 443/TCP | 借大站 TLS 握手伪装,抗封锁,无需域名和证书 |
 | Hysteria2 | 备用 | 另一个端口/UDP(如 8443) | 基于 QUIC,弱网/晚高峰更快 |
+| AnyTLS | Surge 的主力 / 第三备用 | 2053/TCP | **Surge 不支持 VLESS-Reality**;AnyTLS 是 TCP,Surge / 小火箭 / Mihomo 都支持 |
 
 内核选 **sing-box**(开源的 233boy 一键脚本),个人自用最省心,没有 Web 面板 = 少一个攻击面。用户明确要多用户管理/可视化流量统计时,才考虑 3x-ui 这类面板(注意面板别裸奔在公网)。
 
@@ -179,8 +206,14 @@ sb port VLESS-REALITY-<port> 443            # 端口换到 443(最不显眼)
 
 sb add hysteria2 8443   # 加 Hysteria2
 # 注意: sb 的端口占用检测不分 tcp/udp,443 被 Reality(tcp)占了就不能再给 Hy2 用 443,换一个端口号
+
+sb add anytls 2053      # 用户用 Surge 时必加(自签证书,和 Hy2 共用 /etc/sing-box/bin/tls.cer)
 ```
-具体配置名用 `sb info` / `sb list` 查。部署完提醒用户:**如果服务商面板有安全组,要放行 443/TCP 和 Hy2 的 UDP 端口**。
+- 233boy 生成的 Reality **short_id 是空字符串**,链接里没有 `sid=`,客户端 short-id 填 `""` 即可。
+- 自签证书指纹:`openssl x509 -in /etc/sing-box/bin/tls.cer -noout -fingerprint -sha256`,Surge 可用 `server-cert-fingerprint-sha256=` 钉证书,比 `skip-cert-verify` 安全。
+具体配置名用 `sb info` / `sb list` 查。部署完提醒用户:**如果服务商面板有安全组,要放行 443/TCP、2053/TCP 和 Hy2 的 UDP 端口**。
+
+**在服务器上自测三个协议**(本机开着代理时从本机测不准,直接在 VPS 上起一个临时 sing-box 客户端连自己的公网 IP):每个协议一个 socks 入站 → 对应出站,`curl -x socks5h://127.0.0.1:端口 https://www.google.com` 返回 200、`api.ipify.org` 返回 VPS IP 即通过;测完删掉临时配置。
 
 **强制 IPv4 出站**(体检显示 IPv6 解锁差时):sing-box **1.12+ 已弃用** outbound 上的 `domain_strategy` 字段(会报 `FATAL: legacy domain strategy options is deprecated`),新写法是在 `/etc/sing-box/config.json` 里:
 ```json
@@ -205,6 +238,19 @@ echo | openssl s_client -connect <IP>:443 -servername www.apple.com 2>&1 | grep 
 **机器有 IPv6 的话**:sing-box 默认监听 `*:端口`,v6 入站零改动可用,把链接里的 IP 换成 `[v6地址]` 就多了一组 v6 节点。部分地区/运营商方向会对机房 IPv4 做周期性阻断,而 IPv6 走另一条路由往往不受影响——多一组 v6 节点是很便宜的保险。
 
 ### 接入客户端(按第零步问到的设备交付)
+
+**一键生成**:`scripts/gen-clients.sh` 读取 `sb url` 的链接,同时生成 Surge / Shadowrocket / OpenClash 三份:
+```bash
+scp scripts/gen-clients.sh root@IP:/root/_gen.sh
+ssh root@IP 'NAME_PREFIX=FRA bash /root/_gen.sh'          # 输出到 /root/clients/
+scp -r root@IP:/root/clients ./ && ssh root@IP 'rm -rf /root/clients /root/_gen.sh'
+```
+- **Surge**:粘进 `[Proxy]` 和 `[Proxy Group]`(只含 AnyTLS / Hy2)。
+- **Shadowrocket(小火箭)**:复制链接,打开小火箭自动识别剪贴板导入。
+- **OpenClash**:内核必须选 **Meta(Mihomo)**,把 `proxies` / `proxy-groups` 合并进配置(覆写设置或配置文件编辑)。
+- 生成的文件含节点密钥:**本机 `chmod 600`,不要提交到 Git 仓库**。
+
+手工转换的细节如下:
 
 - **v2rayN / NekoBox / Hiddify / Shadowrocket / Stash**:直接导入 `vless://`、`hysteria2://` 链接(复制后在客户端里"从剪贴板导入")。
 - **Clash Verge / Mihomo(Clash Meta)系**:**不吃这种 URI 链接**,粘进"订阅"框会报不可用——这和 https 无关,纯粹是两套配置语言(URI vs YAML)。要转成 YAML 的 `proxies:` 条目:
@@ -242,4 +288,4 @@ echo | openssl s_client -connect <IP>:443 -servername www.apple.com 2>&1 | grep 
 1. 服务端:`systemctl is-active sing-box` = active;`ss -tlnup | grep -E ':443|:8443'` 两个端口都在监听。
 2. 外部:上面的 `openssl s_client` 返回伪装站真实证书。
 3. 客户端:选中新节点后 `curl -s https://api.ipify.org`(走代理)返回的是 VPS 的 IP;能打开 google.com。
-4. 告诉用户:**主力用 Reality,不通/慢了切 Hy2;有 v6 节点的话三者轮着试。**
+4. 告诉用户:**主力用 Reality(Surge 用 AnyTLS),不通/慢了切 Hy2;有 v6 节点的话轮着试。**

@@ -40,7 +40,14 @@
 |---|---|
 | ① 系统初始化 | 更新系统、装常用工具、校时、BBR + TCP 调优、SWAP、Docker、fail2ban、**SSH 改成仅密钥登录**(分步验证,防止把自己锁在外面) |
 | ② 节点体检 | 用开源脚本测 IP 纯净度、Netflix/ChatGPT/Claude 等解锁情况、CPU 性能、对国内三网的延迟和速度,出一份大白话报告 |
-| ③ 部署代理 | sing-box 双协议:**VLESS-Reality(443/TCP,主力)+ Hysteria2(UDP,备用)**,验证伪装生效,按你的客户端交付链接或 Clash YAML |
+| ③ 部署代理 | sing-box 多协议:**VLESS-Reality(443/TCP,主力)+ Hysteria2(UDP,备用)+ AnyTLS(TCP,Surge 用)**,验证伪装生效,一键生成 Surge / 小火箭 / OpenClash 配置 |
+
+## 本 fork 新增
+
+- **Surge 支持**:Surge 不支持 VLESS-Reality,新增 AnyTLS(TCP)作为 Surge 主力
+- **`scripts/gen-clients.sh`**:一键生成 Surge / Shadowrocket(小火箭)/ OpenClash 三份客户端配置
+- **更多踩坑**:新机器硬盘是空的要先重装系统(VNC 显示 `No bootable device`);本机 Surge/Clash TUN 会让任何端口都"握手成功秒断"、很多机场封 22 端口;体检一次约耗 4 GB 流量
+- **更安全的首次登录**:用户自己 `ssh-copy-id` 装公钥,agent 全程不经手密码;可按用户意愿保留密码登录
 
 ## 你需要准备
 
@@ -56,6 +63,7 @@ skills/vps-proxy-node/
 ├── SKILL.md                      # 技能本体:完整流程 + 踩坑经验
 └── scripts/
     ├── setup.sh                  # 一键初始化(幂等,可重复跑)
+    ├── gen-clients.sh            # 一键生成 Surge / 小火箭 / OpenClash 配置
     └── ssh-harden-install.sh     # 给"重启后会把 SSH 打回密码登录"的服务商用的开机自愈
 ```
 
