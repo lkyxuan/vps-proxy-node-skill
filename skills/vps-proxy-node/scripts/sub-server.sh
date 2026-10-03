@@ -38,31 +38,75 @@ rm -rf "$BASE/www"; install -d "$BASE/www/$TOKEN"
 W="$BASE/www/$TOKEN"
 base64 -w0 "$SRC/shadowrocket.txt" > "$W/shadowrocket"                          # 小火箭:base64 订阅
 sed -n '/^\[Proxy\]/,/^\[/{/^\[/d;/^$/d;p}' "$SRC/surge.conf" > "$W/surge.list"  # Surge:policy-path 节点列表
-GROUP="自建-$PREFIX"
-{ # OpenClash:完整可用的 Mihomo 配置(也可当 proxy-provider 用,只读 proxies)
-  cat <<EOF
-mixed-port: 7890
-allow-lan: true
-mode: rule
-log-level: info
-EOF
-  sed -n '/^proxies:/,$p' "$SRC/openclash.yaml"
-  cat <<EOF
+# 带分流规则的完整配置(规则集:blackmatrix7/ios_rule_script,经 jsDelivr,国内可直连)
+U_BASE="https://$DOMAIN:$SUB_PORT/$TOKEN"
+SRC="$SRC" W="$W" U_BASE="$U_BASE" python3 - <<'PY'
+import os, re
+src, w, ubase = os.environ["SRC"], os.environ["W"], os.environ["U_BASE"]
+RS = "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule"
+# (规则集, 策略) —— 顺序即优先级
+RULES = [("Lan", "DIRECT"), ("Advertising", "REJECT"),
+         ("OpenAI", "AI"), ("Claude", "AI"), ("Gemini", "AI"),
+         ("YouTube", "流媒体"), ("Netflix", "流媒体"),
+         ("Telegram", "节点选择"), ("Google", "节点选择"),
+         ("Apple", "苹果"), ("ChinaMax", "DIRECT")]
+SKIP = "127.0.0.1, 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 100.64.0.0/10, localhost, *.local, *.ts.net"
 
-rules:
-  - GEOIP,LAN,DIRECT,no-resolve
-  - GEOSITE,CN,DIRECT
-  - GEOIP,CN,DIRECT
-  - MATCH,$GROUP
-EOF
-} > "$W/clash.yaml"
+surge_nodes = [l for l in open(f"{src}/surge.conf").read().split("[Proxy]\n")[1].split("\n[")[0].splitlines() if "=" in l]
+surge_names = [l.split("=")[0].strip() for l in surge_nodes]
+clash_txt = open(f"{src}/openclash.yaml").read()
+clash_proxies = clash_txt[clash_txt.index("proxies:"):clash_txt.index("proxy-groups:")].rstrip()
+clash_names = re.findall(r"^  - name: (.+)$", clash_proxies, re.M)
+
+def groups(names, fmt):
+    g = [("节点选择", names + ["DIRECT"]), ("AI", ["节点选择"] + names),
+         ("流媒体", ["节点选择"] + names + ["DIRECT"]), ("苹果", ["DIRECT", "节点选择"]),
+         ("漏网之鱼", ["节点选择", "DIRECT"])]
+    return [fmt(n, m) for n, m in g]
+
+# ---------- Surge:托管配置 ----------
+with open(f"{w}/surge.conf", "w") as f:
+    f.write(f"#!MANAGED-CONFIG {ubase}/surge.conf interval=86400 strict=false\n\n")
+    f.write(f"[General]\nloglevel = notify\nipv6 = false\ndns-server = 223.5.5.5, 119.29.29.29, system\n"
+            f"skip-proxy = {SKIP}\nexclude-simple-hostnames = true\n"
+            "internet-test-url = http://www.baidu.com\nproxy-test-url = http://cp.cloudflare.com/generate_204\n\n")
+    f.write("[Proxy]\n" + "\n".join(surge_nodes) + "\n\n[Proxy Group]\n")
+    f.write("\n".join(groups(surge_names, lambda n, m: f"{n} = select, {', '.join(m)}")) + "\n\n[Rule]\n")
+    for r, pol in RULES:
+        f.write(f"RULE-SET,{RS}/Surge/{r}/{r}.list,{pol}" + (",extended-matching" if pol == "REJECT" else "") + "\n")
+    f.write("GEOIP,CN,DIRECT\nFINAL,漏网之鱼,dns-failed\n")
+
+# ---------- 小火箭:规则配置(节点来自订阅,PROXY = 当前选中的节点) ----------
+SR = {"AI": "PROXY", "流媒体": "PROXY", "节点选择": "PROXY", "苹果": "DIRECT"}
+with open(f"{w}/shadowrocket.conf", "w") as f:
+    f.write(f"[General]\nbypass-system = true\nipv6 = false\nprefer-ipv6 = false\n"
+            f"dns-server = system, 223.5.5.5, 119.29.29.29\nskip-proxy = {SKIP}\n"
+            "tun-excluded-routes = 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 255.255.255.255/32\n"
+            f"update-url = {ubase}/shadowrocket.conf\n\n[Rule]\n")
+    for r, pol in RULES:
+        f.write(f"RULE-SET,{RS}/Shadowrocket/{r}/{r}.list,{SR.get(pol, pol)}\n")
+    f.write("GEOIP,CN,DIRECT\nFINAL,PROXY\n")
+
+# ---------- OpenClash(Mihomo):完整配置 + rule-providers ----------
+y = ["mixed-port: 7890", "allow-lan: true", "mode: rule", "log-level: info", "ipv6: false", "", clash_proxies, "", "proxy-groups:"]
+for n, m in [(a, b) for a, b in [(g.split("|")[0], g.split("|")[1].split(",")) for g in groups(clash_names, lambda n, m: n + "|" + ",".join(m))]]:
+    y += [f"  - name: {n}", "    type: select", f"    proxies: [{', '.join(m)}]"]
+y += ["", "rule-providers:"]
+for r, _ in RULES:
+    y += [f"  {r}:", "    type: http", "    behavior: classical", "    format: yaml",
+          f"    url: {RS}/Clash/{r}/{r}.yaml", f"    path: ./ruleset/bm7_{r}.yaml", "    interval: 86400"]
+y += ["", "rules:", "  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve"]
+y += [f"  - RULE-SET,{r},{pol}" for r, pol in RULES]
+y += ["  - GEOIP,CN,DIRECT", "  - MATCH,漏网之鱼"]
+open(f"{w}/clash.yaml", "w").write("\n".join(y) + "\n")
+PY
 rm -rf "$SRC"
 chmod -R a+rX "$BASE/www"
 
 # 3) Caddy
 cat > "$BASE/Caddyfile" <<EOF
 $DOMAIN:$SUB_PORT {
-  @ok path /$TOKEN/shadowrocket /$TOKEN/surge.list /$TOKEN/clash.yaml
+  @ok path /$TOKEN/shadowrocket /$TOKEN/shadowrocket.conf /$TOKEN/surge.list /$TOKEN/surge.conf /$TOKEN/clash.yaml
   handle @ok {
     root * /srv
     header Cache-Control "no-store"
@@ -88,8 +132,10 @@ for i in $(seq 1 30); do curl -sf --max-time 5 -o /dev/null "$U/surge.list" && b
 curl -sf --max-time 5 -o /dev/null "$U/surge.list" && echo "✓ HTTPS 订阅可用" || echo "✗ 还不通:docker logs sub-caddy 看原因(80/tcp 和 $SUB_PORT/tcp 要放行)"
 cat <<EOF
 
-小火箭订阅:   $U/shadowrocket
-Surge 节点:   $U/surge.list     (用法: 自建 = select, policy-path=$U/surge.list)
-OpenClash:    $U/clash.yaml
+小火箭  节点订阅:   $U/shadowrocket
+小火箭  规则配置:   $U/shadowrocket.conf
+Surge   完整配置:   $U/surge.conf      (托管配置,含节点+分流规则)
+Surge   仅节点:     $U/surge.list      (合进已有配置: 自建 = select, policy-path=<这个URL>)
+OpenClash 完整配置: $U/clash.yaml      (含节点+分流规则)
 ⚠️ 拿到链接 = 拿到节点,别外传;泄露了就 ROTATE_TOKEN=yes 重跑
 EOF

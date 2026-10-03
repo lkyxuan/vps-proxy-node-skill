@@ -260,6 +260,8 @@ ssh root@IP 'NAME_PREFIX=FRA bash /opt/sub/bin/sub-server.sh'   # 打印三条�
 - 小火箭:首页 + → 类型 Subscribe → 贴 `/shadowrocket`;Surge:代理组写 `自建 = select, policy-path=<.../surge.list>`;OpenClash:配置订阅里贴 `/clash.yaml`(完整配置),或作为 proxy-provider 合进已有配置。
 - Caddyfile 里 `handle { ... }` / `log { ... }` **不能写成单行**,会报 `Unexpected next token after '{'`,容器无限重启。
 - 取舍:链接即节点,泄露就换 token;比手抄配置方便,但多开了两个端口。
+- **分流规则**:同时发布带规则的完整配置——`surge.conf`(Surge 托管配置)、`shadowrocket.conf`(小火箭规则配置,节点走 `/shadowrocket` 订阅)、`clash.yaml`(Mihomo rule-providers)。规则集统一用 [blackmatrix7/ios_rule_script](https://github.com/blackmatrix7/ios_rule_script)(三端格式齐全、每日更新),经 jsDelivr 拉取,国内可直连。默认分流:局域网 / Tailscale(100.64.0.0/10)直连 → 广告拦截 → OpenAI/Claude/Gemini 走 `AI` → YouTube/Netflix 走 `流媒体` → Google/Telegram 走 `节点选择` → Apple 默认直连 → ChinaMax + GEOIP CN 直连 → 其余 `漏网之鱼`。改规则就改 `sub-server.sh` 里的 `RULES` 列表重跑。
+- Clash 配置交付前用真 Mihomo 内核校验:`mihomo -t -d <目录>`(目录里放 config.yaml),比 YAML 语法检查可靠。
 
 手工转换的细节如下:
 
