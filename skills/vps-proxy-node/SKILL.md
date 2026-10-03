@@ -250,6 +250,17 @@ scp -r root@IP:/root/clients ./ && ssh root@IP 'rm -rf /root/clients /root/_gen.
 - **OpenClash**:内核必须选 **Meta(Mihomo)**,把 `proxies` / `proxy-groups` 合并进配置(覆写设置或配置文件编辑)。
 - 生成的文件含节点密钥:**本机 `chmod 600`,不要提交到 Git 仓库**。
 
+**想贴 URL 就导入(订阅链接)**:`scripts/sub-server.sh` 在 VPS 上用 Caddy(Docker)发布 HTTPS 订阅,域名用 `<IP横杠>.sslip.io`(免费,自动解析到本机 IP),证书自动申请 Let's Encrypt,路径带 32 位随机 token:
+```bash
+ssh root@IP 'install -d -m 700 /opt/sub/bin'
+scp scripts/gen-clients.sh scripts/sub-server.sh root@IP:/opt/sub/bin/
+ssh root@IP 'NAME_PREFIX=FRA bash /opt/sub/bin/sub-server.sh'   # 打印三条订阅 URL
+```
+- 需要放行 **80/tcp(签证书)+ 8880/tcp(订阅)**;节点改了重跑即刷新,`ROTATE_TOKEN=yes` 换 token。
+- 小火箭:首页 + → 类型 Subscribe → 贴 `/shadowrocket`;Surge:代理组写 `自建 = select, policy-path=<.../surge.list>`;OpenClash:配置订阅里贴 `/clash.yaml`(完整配置),或作为 proxy-provider 合进已有配置。
+- Caddyfile 里 `handle { ... }` / `log { ... }` **不能写成单行**,会报 `Unexpected next token after '{'`,容器无限重启。
+- 取舍:链接即节点,泄露就换 token;比手抄配置方便,但多开了两个端口。
+
 手工转换的细节如下:
 
 - **v2rayN / NekoBox / Hiddify / Shadowrocket / Stash**:直接导入 `vless://`、`hysteria2://` 链接(复制后在客户端里"从剪贴板导入")。

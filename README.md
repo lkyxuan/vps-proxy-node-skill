@@ -46,6 +46,7 @@
 
 - **Surge 支持**:Surge 不支持 VLESS-Reality,新增 AnyTLS(TCP)作为 Surge 主力
 - **`scripts/gen-clients.sh`**:一键生成 Surge / Shadowrocket(小火箭)/ OpenClash 三份客户端配置
+- **`scripts/sub-server.sh`**:在 VPS 上发布 HTTPS 订阅链接(sslip.io + Let's Encrypt + 随机 token),客户端贴 URL 就导入
 - **更多踩坑**:新机器硬盘是空的要先重装系统(VNC 显示 `No bootable device`);本机 Surge/Clash TUN 会让任何端口都"握手成功秒断"、很多机场封 22 端口;体检一次约耗 4 GB 流量
 - **更安全的首次登录**:用户自己 `ssh-copy-id` 装公钥,agent 全程不经手密码;可按用户意愿保留密码登录
 
@@ -64,6 +65,7 @@ skills/vps-proxy-node/
 └── scripts/
     ├── setup.sh                  # 一键初始化(幂等,可重复跑)
     ├── gen-clients.sh            # 一键生成 Surge / 小火箭 / OpenClash 配置
+    ├── sub-server.sh             # HTTPS 订阅链接服务(Caddy)
     └── ssh-harden-install.sh     # 给"重启后会把 SSH 打回密码登录"的服务商用的开机自愈
 ```
 
