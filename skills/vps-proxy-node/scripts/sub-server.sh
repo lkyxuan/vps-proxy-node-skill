@@ -50,6 +50,8 @@ RULES = [("Lan", "DIRECT"), ("Advertising", "REJECT"),
          ("YouTube", "流媒体"), ("Netflix", "流媒体"),
          ("Telegram", "节点选择"), ("Google", "节点选择"),
          ("Apple", "苹果"), ("ChinaMax", "DIRECT")]
+# 这几个规则集的域名部分被拆到 <名>_Domain 里(DOMAIN-SET / domain 行为),漏掉会导致国内域名掉进兜底走代理
+SPLIT = {"Advertising", "Apple", "ChinaMax"}
 SKIP = "127.0.0.1, 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 100.64.0.0/10, localhost, *.local, *.ts.net"
 
 surge_nodes = [l for l in open(f"{src}/surge.conf").read().split("[Proxy]\n")[1].split("\n[")[0].splitlines() if "=" in l]
@@ -74,6 +76,8 @@ with open(f"{w}/surge.conf", "w") as f:
     f.write("\n".join(groups(surge_names, lambda n, m: f"{n} = select, {', '.join(m)}")) + "\n\n[Rule]\n")
     for r, pol in RULES:
         f.write(f"RULE-SET,{RS}/Surge/{r}/{r}.list,{pol}" + (",extended-matching" if pol == "REJECT" else "") + "\n")
+        if r in SPLIT:
+            f.write(f"DOMAIN-SET,{RS}/Surge/{r}/{r}_Domain.list,{pol}\n")
     f.write("GEOIP,CN,DIRECT\nFINAL,漏网之鱼,dns-failed\n")
 
 # ---------- 小火箭:规则配置(节点来自订阅,PROXY = 当前选中的节点) ----------
@@ -85,6 +89,8 @@ with open(f"{w}/shadowrocket.conf", "w") as f:
             f"update-url = {ubase}/shadowrocket.conf\n\n[Rule]\n")
     for r, pol in RULES:
         f.write(f"RULE-SET,{RS}/Shadowrocket/{r}/{r}.list,{SR.get(pol, pol)}\n")
+        if r in SPLIT:
+            f.write(f"DOMAIN-SET,{RS}/Shadowrocket/{r}/{r}_Domain.list,{SR.get(pol, pol)}\n")
     f.write("GEOIP,CN,DIRECT\nFINAL,PROXY\n")
 
 # ---------- OpenClash(Mihomo):完整配置 + rule-providers ----------
@@ -95,8 +101,17 @@ y += ["", "rule-providers:"]
 for r, _ in RULES:
     y += [f"  {r}:", "    type: http", "    behavior: classical", "    format: yaml",
           f"    url: {RS}/Clash/{r}/{r}.yaml", f"    path: ./ruleset/bm7_{r}.yaml", "    interval: 86400"]
+    if r in SPLIT:
+        y += [f"  {r}_Domain:", "    type: http", "    behavior: domain", "    format: yaml",
+              f"    url: {RS}/Clash/{r}/{r}_Domain.yaml", f"    path: ./ruleset/bm7_{r}_Domain.yaml", "    interval: 86400"]
+# 节点服务器自身直连:防止局域网里开着小火箭/Surge 的设备经路由器再套一层代理
+node_ips = sorted(set(re.findall(r"^    server: (\S+)$", clash_proxies, re.M)))
 y += ["", "rules:", "  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve"]
-y += [f"  - RULE-SET,{r},{pol}" for r, pol in RULES]
+y += [f"  - IP-CIDR,{ip}/32,DIRECT,no-resolve" for ip in node_ips if re.fullmatch(r"[\d.]+", ip)]
+for r, pol in RULES:
+    y.append(f"  - RULE-SET,{r},{pol}")
+    if r in SPLIT:
+        y.append(f"  - RULE-SET,{r}_Domain,{pol}")
 y += ["  - GEOIP,CN,DIRECT", "  - MATCH,漏网之鱼"]
 open(f"{w}/clash.yaml", "w").write("\n".join(y) + "\n")
 PY
