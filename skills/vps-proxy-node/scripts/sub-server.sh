@@ -94,7 +94,36 @@ with open(f"{w}/shadowrocket.conf", "w") as f:
     f.write("GEOIP,CN,DIRECT\nFINAL,PROXY\n")
 
 # ---------- OpenClash(Mihomo):完整配置 + rule-providers ----------
-y = ["mixed-port: 7890", "allow-lan: true", "mode: rule", "log-level: info", "ipv6: false", "", clash_proxies, "", "proxy-groups:"]
+# DNS 必须自带:不写的话 OpenClash 会补默认 fallback(dns.cloudflare.com / dns.google DoH),
+# 在国内直连不通 → 解析出海外 IP 的直连域名(iCloud、飞书等)全部 "dns resolve failed"。
+# fake-ip 下走代理的域名由节点远端解析,这里只需管好直连域名 → 全用国内 DoH,不设 fallback。
+DNS = """dns:
+  enable: true
+  ipv6: false
+  listen: 0.0.0.0:7874
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '*.lan'
+    - '*.local'
+    - '+.arpa'
+    - '+.ts.net'
+    - 'time.*.com'
+    - 'ntp.*.com'
+    - '+.msftconnecttest.com'
+    - '+.msftncsi.com'
+    - 'localhost.ptlogin2.qq.com'
+    - '+.stun.*.*'
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+  proxy-server-nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query"""
+y = ["mixed-port: 7890", "allow-lan: true", "mode: rule", "log-level: info", "ipv6: false", "", DNS, "", clash_proxies, "", "proxy-groups:"]
 for n, m in [(a, b) for a, b in [(g.split("|")[0], g.split("|")[1].split(",")) for g in groups(clash_names, lambda n, m: n + "|" + ",".join(m))]]:
     y += [f"  - name: {n}", "    type: select", f"    proxies: [{', '.join(m)}]"]
 y += ["", "rule-providers:"]

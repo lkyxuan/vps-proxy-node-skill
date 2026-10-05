@@ -262,6 +262,7 @@ ssh root@IP 'NAME_PREFIX=FRA bash /opt/sub/bin/sub-server.sh'   # 打印三条�
 - 取舍:链接即节点,泄露就换 token;比手抄配置方便,但多开了两个端口。
 - **分流规则**:同时发布带规则的完整配置——`surge.conf`(Surge 托管配置)、`shadowrocket.conf`(小火箭规则配置,节点走 `/shadowrocket` 订阅)、`clash.yaml`(Mihomo rule-providers)。规则集统一用 [blackmatrix7/ios_rule_script](https://github.com/blackmatrix7/ios_rule_script)(三端格式齐全、每日更新),经 jsDelivr 拉取,国内可直连。默认分流:局域网 / Tailscale(100.64.0.0/10)直连 → 广告拦截 → OpenAI/Claude/Gemini 走 `AI` → YouTube/Netflix 走 `流媒体` → Google/Telegram 走 `节点选择` → Apple 默认直连 → ChinaMax + GEOIP CN 直连 → 其余 `漏网之鱼`。改规则就改 `sub-server.sh` 里的 `RULES` 列表重跑。
 - **⚠️ blackmatrix7 大规则集是拆开的**:`ChinaMax.list` 只有几十条域名 + IP 段,**11 万条国内域名在 `ChinaMax_Domain.list`**(Surge/小火箭用 `DOMAIN-SET`,Clash 用 `behavior: domain`)。`Advertising`、`Apple` 同理。只引 `X.list` 的话,国内 App 的图片 CDN、音乐等会掉进兜底走代理——症状就是「国内服务也走了梯子」。验证:看 OpenClash 日志里有没有 `RuleSet(ChinaMax_Domain) DIRECT`。
+- **Clash 配置必须自带 `dns:` 段**:不写的话 OpenClash 会补默认的 `fallback`(dns.cloudflare.com / dns.google 的 DoH),国内直连不通,解析出海外 IP 的直连域名(iCloud、飞书…)全部 `dns resolve failed`,表现为"切到新配置后有些网站打不开"。fake-ip 模式下代理域名由节点远端解析,所以 `nameserver` 只放国内 DoH(alidns / doh.pub),**不设 fallback**。排查:日志按重启后的行号统计 `dns resolve failed`(日志重启不清空,别被累计数骗了)。
 - 路由器配置里给**节点服务器 IP 加 DIRECT**,否则家里开着小火箭/Surge 的设备会经路由器再套一层代理。
 - Clash 配置交付前用真 Mihomo 内核校验:`mihomo -t -d <目录>`(目录里放 config.yaml),比 YAML 语法检查可靠。
 
